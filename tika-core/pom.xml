@@ -290,6 +290,35 @@
           </execution>
         </executions>
       </plugin>
+      <!-- Generate ChatUniTest tests whenever tika-core reaches the compile phase. -->
+      <plugin>
+        <groupId>io.github.zju-aces-ise</groupId>
+        <artifactId>chatunitest-maven-plugin</artifactId>
+        <version>2.1.1</version>
+        <configuration>
+          <!-- Ollama does not require authentication, but ChatUniTest requires a non-empty value. -->
+          <apiKeys>ollama</apiKeys>
+          <model>code-llama</model>
+          <url>http://127.0.0.1:11434/v1/chat/completions</url>
+          <testNumber>1</testNumber>
+          <maxRounds>2</maxRounds>
+          <thread>false</thread>
+          <stopWhenSuccess>true</stopWhenSuccess>
+          <tmpOutput>${project.build.directory}/chatunitest-info</tmpOutput>
+          <testOutput>${project.basedir}/chatunitest</testOutput>
+          <merge>true</merge>
+        </configuration>
+        <executions>
+          <execution>
+            <id>generate-chatunitests</id>
+            <phase>compile</phase>
+            <goals>
+              <goal>parse</goal>
+              <goal>project</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
     </plugins>
   </build>
   <reporting>
