@@ -290,6 +290,115 @@
           </execution>
         </executions>
       </plugin>
+      <!-- Generate a ChatUniTest test for a method in EmbeddedDocumentUtil at compile time. -->
+      <plugin>
+        <groupId>io.github.zju-aces-ise</groupId>
+        <artifactId>chatunitest-maven-plugin</artifactId>
+        <version>2.1.1</version>
+        <configuration>
+          <!-- Ollama does not require authentication, but ChatUniTest requires a non-empty value. -->
+          <apiKeys>ollama</apiKeys>
+          <model>code-llama</model>
+          <url>http://127.0.0.1:11434/v1/chat/completions</url>
+          <testNumber>1</testNumber>
+          <maxRounds>4</maxRounds>
+          <thread>false</thread>
+          <stopWhenSuccess>true</stopWhenSuccess>
+          <temperature>0.0</temperature>
+          <maxResponseTokens>4096</maxResponseTokens>
+          <selectMethod>
+            org.apache.tika.extractor.EmbeddedDocumentUtil#${chatunitest.targetMethodName}
+          </selectMethod>
+          <promptPath>${project.basedir}/src/test/chatunitest/prompt</promptPath>
+          <tmpOutput>${project.build.directory}/chatunitest-info</tmpOutput>
+          <testOutput>${project.build.directory}/generated-test-sources/chatunitest</testOutput>
+          <merge>false</merge>
+        </configuration>
+        <executions>
+          <execution>
+            <id>generate-chatunitests</id>
+            <phase>compile</phase>
+            <goals>
+              <!-- Prevent stale generated tests from satisfying the verification gate. -->
+              <goal>clean</goal>
+              <goal>parse</goal>
+              <goal>method</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>build-helper-maven-plugin</artifactId>
+        <version>3.6.1</version>
+        <executions>
+          <execution>
+            <id>add-chatunitest-test-sources</id>
+            <phase>generate-test-sources</phase>
+            <goals>
+              <goal>add-test-source</goal>
+            </goals>
+            <configuration>
+              <sources>
+                <source>${chatunitest.generatedTestSources}</source>
+              </sources>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-antrun-plugin</artifactId>
+        <version>${maven.antrun.version}</version>
+        <executions>
+          <execution>
+            <id>verify-chatunitest-output</id>
+            <phase>process-test-sources</phase>
+            <goals>
+              <goal>run</goal>
+            </goals>
+            <configuration>
+              <target>
+                <mkdir dir="${chatunitest.generatedTestSources}" />
+                <fail message="ChatUniTest did not generate all expected EmbeddedDocumentUtil tests">
+                  <condition>
+                    <resourcecount count="${chatunitest.expectedTestCount}" when="less">
+                      <fileset dir="${chatunitest.generatedTestSources}">
+                        <include
+                            name="**/EmbeddedDocumentUtil_${chatunitest.targetMethodName}_*_Test.java" />
+                      </fileset>
+                    </resourcecount>
+                  </condition>
+                </fail>
+              </target>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+            <!-- Mutation testing with PIT -->
+      <plugin>
+        <groupId>org.pitest</groupId>
+        <artifactId>pitest-maven</artifactId>
+        <version>1.22.0</version>
+
+        <dependencies>
+          <dependency>
+            <groupId>org.pitest</groupId>
+            <artifactId>pitest-junit5-plugin</artifactId>
+            <version>1.2.3</version>
+          </dependency>
+        </dependencies>
+
+        <configuration>
+          <targetClasses>
+            <param>org.apache.tika.extractor.EmbeddedDocumentUtil</param>
+          </targetClasses>
+          <targetTests>
+            <param>org.apache.tika.extractor.EmbeddedDocumentUtilExtensionTest</param>
+            <param>org.apache.tika.extractor.EmbeddedDocumentUtil_normalizeMediaType_*</param>
+          </targetTests>
+        </configuration>
+      </plugin>
     </plugins>
   </build>
   <reporting>
