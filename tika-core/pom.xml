@@ -34,6 +34,14 @@
   <name>Apache Tika core</name>
   <url>https://tika.apache.org/</url>
 
+  <properties>
+    <chatunitest.targetMethodName>normalizeMediaType</chatunitest.targetMethodName>
+    <chatunitest.expectedTestCount>1</chatunitest.expectedTestCount>
+    <chatunitest.generatedTestSources>
+      ${project.build.directory}/generated-test-sources/chatunitest/tika-parent/tika-core
+    </chatunitest.generatedTestSources>
+  </properties>
+
   <dependencies>
     <!-- See https://issues.apache.org/jira/browse/TIKA-2566 for more info -->
     <dependency>
@@ -117,6 +125,17 @@
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter-engine</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-junit-jupiter</artifactId>
+      <version>${mockito-junit-jupiter.version}</version>
       <scope>test</scope>
     </dependency>
   </dependencies>
