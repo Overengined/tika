@@ -18,6 +18,7 @@ package org.apache.tika.extractor;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 import org.junit.jupiter.api.Test;
 
@@ -146,5 +147,18 @@ public class EmbeddedDocumentUtilExtensionTest {
         MediaType withParams = MediaType.parse("text/plain; charset=UTF-8");
         assertEquals(withParams,
                 MimeTypes.getDefaultMimeTypes().getMediaTypeRegistry().normalize(withParams));
+    }
+    @Test
+    public void testExistingEmbeddedDocumentExtractorIsReturned() {
+        ParseContext context = new ParseContext();
+        EmbeddedDocumentExtractor expected =
+                new ParsingEmbeddedDocumentExtractor(context);
+
+        context.set(EmbeddedDocumentExtractor.class, expected);
+
+        EmbeddedDocumentExtractor actual =
+                EmbeddedDocumentUtil.getEmbeddedDocumentExtractor(context);
+
+        assertSame(expected, actual);
     }
 }
