@@ -9,6 +9,52 @@
 
 Ce travail consiste à analyser les tests unitaires existants, à évaluer les tests générés automatiquement et à utiliser les tests de mutation pour identifier des comportements insuffisamment vérifiés.
 
+# Partie 0 - Mise en place et execution de ChatUnitest
+
+## Objectifs
+
+ChatUniTest est un plugin maven qui permet d'exploiter un serveur d'inférence local dans le but d'utiliser un LLM pour générer 
+des test pour les classes Maven qu'on lui spécifie.
+Le principe de fonctionnement du plugin est le suivant : 
+Le code objectif est d'abord analysé et ségmenté en blocs sémantiques, ces blocs sémantiques sont ensuite envoyés au LLM 
+externe (ici une instance locale de codellama) avec un prompt approprié pour la génération de test. Avant de considérer ces
+test comme valides, le plugin s'assure que le code compile. Si ce n'est pas le cas, on demande au LLM de réparer son test défectueux.
+Le nombre de tentative, le comportement du plugin et le fait d'éxecuter ou non plusieurs analyses en parallèle font partie des
+paramètres qui peuvent être ajustés dans le `pom.xml`.
+
+## Obstacles rencontrés
+
+### LLM attendu
+
+ChatUniTest attends de façon hardcodée un de plusieurs modèles de LLMs disponibles sur le serveur d'inférence vers lequel on le dirige. 
+Le problème est que ces modèles sont tous dépassés et/ou plus disponible, nous avons donc leuré ChatUniTest en créannt un alias sur ollama entre 
+`codellama` et `code-llama`. Cet alias a permis à ChatUniTest d'accepter le modèle disponible sur nos machines.
+
+### Réduction du scope
+
+Si on avait laissé ChatUniTest s'executer sur son scope par défaut, l'opération aurait pris plusieurs heures à parcourir tous les blocs 
+sémantiques. Pour éviter cela, on a fait des ajustement pour que ChatUniTest ne se concentre que sur tika-core.
+
+### Désactivation du processing en parallèle
+
+Il a été choisi de passer l'autorisation de traitement en parallèle par threads à `false` car il a été constaté que le gain sur un système non
+distribué était très limité (voire entraainait des bugs en consommant plus de mémoire que le système ne pouvait en proposer, causant des timeouts
+à cause de la lanteur relative du paging sur disque) tout en rendant le débogage plus difficle en rendant les traces beaucoup moins lisbles.
+
+## Commentaire sur les tests
+
+Tout les fichiers sources de test générés par chatunitest sont enregistrés dans une structure miroir du module visé. 
+Pour notre classe `EmbeddedDocumentUtil.java`, le test généré va se retrouver dans `target/generated-test-sources/chatunitest/tika-parent/tika-core/org/apache/tika/extractor/`.
+Ce test compile (autrement ChatUniTest causerait l'interruption du processus de build/test) et ne nécéssite pas de 
+modifications manuelle au niveau du code source.
+
+C'est un test de non-régression relativement basique qui se contente de vérifier que la classe se comporte comme elle se comportait au moment de la création du test. 
+Quand on le met en perspective avec la façon dont CUT fonctionne, cela fait du sens puisque ce plugin n'analyse pas la 
+documentation et ne connait pas les grands principes du projet dans lequel il évolue. De la sorte, les LLMs employés vont
+se contenter de générer des test satisfaisant l'état actuel du code. C'est techniquement une faille dans la politique de test puisque si le 
+code tel que soumis à l'outil cintient un bug qui n'empeche pas la compilation, celui-ci risque d'etre considéré comme un comportemrnt attendu 
+par CUT. 
+
 ---
 
 # Partie 1 — Analyse de mutation avec PIT (Pitest)
