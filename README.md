@@ -9,7 +9,7 @@
 
 Ce travail consiste à analyser les tests unitaires existants, à évaluer les tests générés automatiquement et à utiliser les tests de mutation pour identifier des comportements insuffisamment vérifiés.
 
-# Partie 0 - Mise en place et execution de ChatUnitest
+# Partie 1 - Mise en place et execution de ChatUnitest
 
 ## Objectifs
 
@@ -57,7 +57,7 @@ par CUT.
 
 ---
 
-# Partie 1 — Analyse de mutation avec PIT (Pitest)
+# Partie 2 — Analyse de mutation avec PIT (Pitest)
 
 ## 1. Objectif
 
@@ -460,30 +460,3 @@ Après cette modification :
 - Le test strength est passé de 95 % à 100 %.
 
 Cette expérience montre que les tests de mutation permettent de détecter des faiblesses que les mesures traditionnelles de couverture ne révèlent pas nécessairement.
-
----
-
-# Partie 2 — ChatUniTest
-
-> **Ta partie.**
-
-## 1. Installation et configuration de ChatUniTest
-
-*À compléter.*
-
-## 2. Sélection des méthodes et génération automatique des tests
-
-*À compléter.*
-
-## 3. Description des tests générés
-
-*À compléter.*
-
-## 4. Compilation, exécution et corrections nécessaires
-
-*À compléter.*
-
-## 5. Comparaison qualitative des oracles avec les tests originaux
-
-*À compléter.*
-
