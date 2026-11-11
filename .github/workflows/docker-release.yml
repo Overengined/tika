@@ -32,10 +32,9 @@ name: Docker release - tika-server and tika-grpc
 # (`*-*`) that gates `:latest` defense-in-depth for the workflow_dispatch
 # path where the auto-trigger filter isn't in play.
 on:
-  push:
-    tags-ignore:
-      - '*-*'   # anything with a hyphen is a prerelease/non-GA tag
-      - '*_*'   # anything with an underscore is a branch/non-version tag
+  workflow_run:
+    workflows: ["semgrep-vulnerability-analysis"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:

@@ -18,11 +18,9 @@
 name: Docker snapshot - tika-server and tika-grpc
 
 on:
-  push:
-    branches: [ main ]
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
+  workflow_run:
+    workflows: ["semgrep-vulnerability-analysis"]
+    types: [completed]
 
 jobs:
   # Gate: publish snapshot images ONLY for -SNAPSHOT versions. The
