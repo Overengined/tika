@@ -1,462 +1,442 @@
 
-# IFT3913 — Tâche 2 : Génération de tests et analyse de mutation
+# IFT3913 — Tâche 3 : Analyse des vulnérabilités avec Semgrep
 
-## Projet étudié
+## 1. Modification du workflow GitHub Actions
 
-**Projet :** Apache Tika  
-**Module :** `tika-core`  
-**Classe sélectionnée :** `org.apache.tika.extractor.EmbeddedDocumentUtil`
+### 1.1 Objectif
 
-Ce travail consiste à analyser les tests unitaires existants, à évaluer les tests générés automatiquement et à utiliser les tests de mutation pour identifier des comportements insuffisamment vérifiés.
+Pour cette partie de la tâche 3, nous devions modifier le workflow GitHub Actions de Tika pour que le processus de build échoue lorsqu'un commit introduit une nouvelle vulnérabilité détectée par Semgrep.
 
-# Partie 1 - Mise en place et execution de ChatUnitest
+L'objectif était donc de ne pas seulement détecter les vulnérabilités présentes dans le code, mais aussi de comparer les résultats avant et après les modifications.
 
-## Objectifs
+Le workflow modifié se trouve dans le fichier :
 
-ChatUniTest est un plugin maven qui permet d'exploiter un serveur d'inférence local dans le but d'utiliser un LLM pour générer 
-des test pour les classes Maven qu'on lui spécifie.
-Le principe de fonctionnement du plugin est le suivant : 
-Le code objectif est d'abord analysé et ségmenté en blocs sémantiques, ces blocs sémantiques sont ensuite envoyés au LLM 
-externe (ici une instance locale de codellama) avec un prompt approprié pour la génération de test. Avant de considérer ces
-test comme valides, le plugin s'assure que le code compile. Si ce n'est pas le cas, on demande au LLM de réparer son test défectueux.
-Le nombre de tentative, le comportement du plugin et le fait d'éxecuter ou non plusieurs analyses en parallèle font partie des
-paramètres qui peuvent être ajustés dans le `pom.xml`.
+`.github/workflows/semgrep-vulnerability-analysis.yml`
 
-## Obstacles rencontrés
+### 1.2 Modifications apportées
 
-### LLM attendu
+Un premier workflow GitHub Actions avait déjà été créé. Il permettait d'installer Semgrep et de lancer une analyse sur un fichier Java de Tika avec la configuration `p/default`.
 
-ChatUniTest attends de façon hardcodée un de plusieurs modèles de LLMs disponibles sur le serveur d'inférence vers lequel on le dirige. 
-Le problème est que ces modèles sont tous dépassés et/ou plus disponible, nous avons donc leuré ChatUniTest en créannt un alias sur ollama entre 
-`codellama` et `code-llama`. Cet alias a permis à ChatUniTest d'accepter le modèle disponible sur nos machines.
+Cependant, cette première version ne comparait pas les vulnérabilités présentes avant et après un commit. Elle utilisait également une variable `EXIT_CODE` pour essayer de provoquer un échec, mais cette variable n'était pas transmise correctement entre les étapes du workflow.
 
-### Réduction du scope
+Nous avons donc modifié le workflow pour ajouter les fonctionnalités suivantes :
 
-Si on avait laissé ChatUniTest s'executer sur son scope par défaut, l'opération aurait pris plusieurs heures à parcourir tous les blocs 
-sémantiques. Pour éviter cela, on a fait des ajustement pour que ChatUniTest ne se concentre que sur tika-core.
+- Déclenchement automatique lors d'une pull request vers `main` ou `dev`.
+- Installation de Python 3.12 et de Semgrep 1.185.0.
+- Récupération de la version de référence du code avec Git.
+- Analyse du fichier `EmbeddedDocumentUtil.java` avant et après les modifications.
+- Génération de deux rapports Semgrep au format JSON.
+- Comparaison des résultats afin d'identifier les nouvelles vulnérabilités.
+- Échec automatique du workflow lorsqu'au moins une nouvelle vulnérabilité est détectée.
 
-### Désactivation du processing en parallèle
+Le workflow peut également être exécuté manuellement avec `workflow_dispatch`.
 
-Il a été choisi de passer l'autorisation de traitement en parallèle par threads à `false` car il a été constaté que le gain sur un système non
-distribué était très limité (voire entraainait des bugs en consommant plus de mémoire que le système ne pouvait en proposer, causant des timeouts
-à cause de la lanteur relative du paging sur disque) tout en rendant le débogage plus difficle en rendant les traces beaucoup moins lisbles.
+### 1.3 Choix des règles Semgrep
 
-## Commentaire sur les tests
+Au départ, nous avons utilisé la configuration `p/java`, qui exécutait 60 règles Java dans notre environnement.
 
-Tout les fichiers sources de test générés par chatunitest sont enregistrés dans une structure miroir du module visé. 
-Pour notre classe `EmbeddedDocumentUtil.java`, le test généré va se retrouver dans `target/generated-test-sources/chatunitest/tika-parent/tika-core/org/apache/tika/extractor/`.
-Ce test compile (autrement ChatUniTest causerait l'interruption du processus de build/test) et ne nécéssite pas de 
-modifications manuelle au niveau du code source.
+Cependant, après avoir introduit les vulnérabilités, seulement trois étaient détectées.
 
-C'est un test de non-régression relativement basique qui se contente de vérifier que la classe se comporte comme elle se comportait au moment de la création du test. 
-Quand on le met en perspective avec la façon dont CUT fonctionne, cela fait du sens puisque ce plugin n'analyse pas la 
-documentation et ne connait pas les grands principes du projet dans lequel il évolue. De la sorte, les LLMs employés vont
-se contenter de générer des test satisfaisant l'état actuel du code. C'est techniquement une faille dans la politique de test puisque si le 
-code tel que soumis à l'outil cintient un bug qui n'empeche pas la compilation, celui-ci risque d'etre considéré comme un comportemrnt attendu 
-par CUT. 
+Nous avons aussi essayé les configurations `p/security-audit` et `p/owasp-top-ten`, mais elles ne détectaient pas les quatre autres vulnérabilités.
+
+Nous avons donc décidé de conserver `p/java` et d'ajouter quatre règles officielles supplémentaires :
+
+- `object-deserialization`
+- `xmlinputfactory-external-entities-enabled`
+- `overly-permissive-file-permission`
+- `command-injection-formatted-runtime-call`
+
+Nous n'avons pas créé de règles personnalisées. Toutes les règles utilisées proviennent de Semgrep.
+
+Avec cette configuration, nous avons exécuté 64 règles, ce qui nous a permis de détecter les 7 vulnérabilités introduites dans notre classe.
+
+### 1.4 Comparaison des rapports
+
+Pour savoir si une vulnérabilité est nouvelle, le workflow analyse deux versions du fichier Java.
+
+La première version correspond au code de référence, avant les modifications. La deuxième correspond au code présent dans la pull request.
+
+Les résultats sont enregistrés dans deux fichiers :
+
+- `avant.json`
+- `apres.json`
+
+Nous avons utilisé un script Python directement dans le workflow pour comparer les deux rapports.
+
+Le script récupère les détections Semgrep et les compare selon l'identifiant de la règle, le chemin du fichier et le code signalé.
+
+Nous avons choisi cette méthode plutôt qu'une comparaison des numéros de ligne, car les lignes peuvent changer lorsqu'on ajoute ou supprime du code.
+
+Si une nouvelle détection apparaît dans le rapport après les modifications, le script termine avec `sys.exit(1)`, ce qui provoque l'échec du job GitHub Actions.
+
+Si aucune nouvelle vulnérabilité n'est détectée, le script termine normalement.
+
+Cette comparaison est adaptée à notre cas d'étude, mais elle a certaines limites. Par exemple, une modification du code signalé pourrait être considérée comme une nouvelle détection même si le problème existait déjà.
+
+### 1.5 Validation du workflow
+
+Pour valider notre modification, nous avons d'abord effectué les analyses Semgrep localement.
+
+Nous avons analysé la version originale de `EmbeddedDocumentUtil.java`, puis la version contenant les sept vulnérabilités introduites.
+
+Les résultats obtenus étaient les suivants :
+
+| Analyse | Vulnérabilités détectées |
+|---|---|
+| Avant les modifications | 0 |
+| Après les modifications | 7 |
+| Nouvelles vulnérabilités | 7 |
+
+Après cette vérification locale, nous avons créé une branche `tache3-semgrep` contenant les modifications du code Java ainsi que le nouveau workflow.
+
+Nous avons ensuite créé une pull request vers la branche `main` de notre fork Tika pour tester l'exécution de GitHub Actions.
+
+Lors de l'exécution, le workflow a produit les résultats suivants :
+
+```text
+Vulnerabilites avant : 0
+Vulnerabilites apres : 7
+Nouvelles vulnerabilites : 7
+
+ECHEC : nouvelles vulnerabilites detectees.
+Process completed with exit code 1.
+```
+
+Le workflow a donc échoué à l'étape de comparaison des vulnérabilités, comme prévu.
+
+Cet échec est volontaire et montre que le workflow est capable de bloquer une pull request qui introduit de nouvelles vulnérabilités détectées par Semgrep.
+
+Les rapports JSON sont également configurés pour être publiés comme artifacts dans GitHub Actions, ce qui permet de consulter les résultats des analyses.
+
+### 1.6 Limites
+
+Notre workflow analyse actuellement uniquement la classe `EmbeddedDocumentUtil.java`, puisque c'est dans cette classe que nous avons introduit les vulnérabilités pour la tâche 3.
+
+Il pourrait être amélioré pour analyser l'ensemble des classes Java de Tika.
+
+De plus, nous avons validé le scénario où sept nouvelles vulnérabilités sont introduites. Le scénario où aucune nouvelle vulnérabilité n'est ajoutée n'a pas encore été testé directement dans GitHub Actions.
+
+### 1.7 Conclusion
+
+La modification du workflow GitHub Actions nous a permis d'automatiser la détection des nouvelles vulnérabilités dans notre cas d'étude.
+
+La principale amélioration par rapport à la première version est l'ajout d'une comparaison entre les résultats Semgrep avant et après les modifications.
+
+Nous avons réussi à détecter les sept vulnérabilités introduites et à faire échouer automatiquement le workflow lors de notre test sur GitHub.
+
+Cette validation montre que le mécanisme fonctionne pour le scénario testé et permet de mieux contrôler l'introduction de nouvelles vulnérabilités dans le code.
 
 ---
 
-# Partie 2 — Analyse de mutation avec PIT (Pitest)
+## 2. Introduction des vulnérabilités dans Apache Tika
 
-## 1. Objectif
+### 2.1 Objectif et choix du fichier
 
-Nous avons utilisé PIT (Pitest) afin d'évaluer la qualité des tests unitaires de la classe `EmbeddedDocumentUtil`.
+Pour cette partie de la tâche 3, nous devions modifier le code de notre cas d'étude Apache Tika afin d'introduire 7 vulnérabilités de types différents pouvant être détectées par Semgrep.
 
-PIT introduit automatiquement de petites modifications dans le code source, appelées **mutants**, puis exécute les tests afin de vérifier si ces modifications sont détectées.
-
-Les résultats principaux sont :
-
-- **KILLED** : un test échoue à cause de la mutation. Le mutant est détecté.
-- **SURVIVED** : aucun test ne détecte la modification introduite.
-- **NO_COVERAGE** : aucun test sélectionné n'exécute le code contenant la mutation.
-
-Notre démarche comprend trois étapes :
-
-1. Exécuter PIT avec les tests originaux.
-2. Comparer les résultats après l'ajout des tests générés automatiquement.
-3. Analyser le mutant survivant, ajouter un test manuel et exécuter PIT de nouveau.
-
-## 2. Classe sélectionnée et justification
-
-La classe analysée est :
-
-`org.apache.tika.extractor.EmbeddedDocumentUtil`
-
-Fichier source :
+Nous avons choisi de modifier la classe suivante :
 
 `tika-core/src/main/java/org/apache/tika/extractor/EmbeddedDocumentUtil.java`
 
-Fichier contenant les tests originaux :
+Nous avons choisi cette classe parce que nous avions déjà travaillé dessus pendant la tâche 2, notamment pour les tests unitaires et les tests de mutation. Nous connaissions donc déjà sa structure et certaines de ses fonctionnalités.
 
-`tika-core/src/test/java/org/apache/tika/extractor/EmbeddedDocumentUtilExtensionTest.java`
+Cette classe sert principalement à gérer les documents intégrés dans Tika, notamment la détection des types de fichiers, les métadonnées et la récupération des parseurs.
 
-Cette classe contient des méthodes utilitaires liées au traitement des documents intégrés, notamment la normalisation des types MIME, la génération de noms de ressources et la récupération d'extracteurs.
+Nous avons ajouté les vulnérabilités dans des méthodes séparées à la fin de la classe. Cela nous permettait de les identifier facilement et de ne pas modifier directement les méthodes existantes.
 
-Elle possédait déjà des tests unitaires, mais sa couverture était incomplète.
+Les méthodes vulnérables ont été ajoutées uniquement pour la tâche et ne sont pas appelées par le fonctionnement normal de Tika.
 
-### Couverture initiale
+### 2.2 Vulnérabilité 1 — Algorithme cryptographique faible (MD5)
 
-| Mesure | Résultat |
-|---|---|
-| Instructions | 123 / 378 (32,5 %) |
-| Branches | 15 / 62 (24,2 %) |
-| Lignes | 32 / 107 (29,9 %) |
-| Méthodes | 9 / 22 (40,9 %) |
+**Type :** Utilisation d'un algorithme cryptographique faible  
+**CWE :** CWE-327  
+**Règle Semgrep :** `java.lang.security.audit.crypto.use-of-md5.use-of-md5`  
+**Ligne détectée :** 401
 
-La classe respectait donc les critères de sélection : elle possédait déjà des tests, n'était pas couverte à 100 % et contenait un mutant survivant identifié par PIT.
-
-## 3. Configuration de PIT
-
-Nous avons intégré PIT dans le fichier `tika-core/pom.xml`.
-
-La configuration utilisée est :
-
-```xml
-<!-- Mutation testing with PIT -->
-<plugin>
-  <groupId>org.pitest</groupId>
-  <artifactId>pitest-maven</artifactId>
-  <version>1.22.0</version>
-
-  <dependencies>
-    <dependency>
-      <groupId>org.pitest</groupId>
-      <artifactId>pitest-junit5-plugin</artifactId>
-      <version>1.2.3</version>
-    </dependency>
-  </dependencies>
-
-  <configuration>
-    <targetClasses>
-      <param>org.apache.tika.extractor.EmbeddedDocumentUtil</param>
-    </targetClasses>
-
-    <targetTests>
-      <param>org.apache.tika.extractor.EmbeddedDocumentUtilExtensionTest</param>
-      <param>org.apache.tika.extractor.EmbeddedDocumentUtil_normalizeMediaType_*</param>
-    </targetTests>
-  </configuration>
-</plugin>
-```
-
-Le paramètre `targetClasses` indique la classe dans laquelle PIT doit générer des mutations.
-
-Le paramètre `targetTests` indique les classes de tests utilisées pour détecter ces mutations.
-
-Nous avons initialement sélectionné uniquement `EmbeddedDocumentUtilExtensionTest`, puis ajouté la classe de tests générée automatiquement pour comparer les résultats.
-
-La dépendance `pitest-junit5-plugin` permet d'utiliser PIT avec JUnit 5.
-
-### Commande d'exécution
-
-Depuis la racine du dépôt, sous Windows :
-
-```powershell
-.\mvnw.cmd -pl tika-core org.pitest:pitest-maven:mutationCoverage
-```
-
-Les rapports HTML sont générés dans :
-
-`tika-core/target/pit-reports/`
-
-Ces rapports permettent d'identifier les mutants tués, survivants et non couverts, ainsi que les méthodes concernées.
-
-## 4. Première analyse : tests originaux
-
-Nous avons d'abord exécuté PIT avec uniquement les tests existants de `EmbeddedDocumentUtilExtensionTest`.
-
-Cette première exécution nous a permis d'établir une référence avant l'ajout des nouveaux tests.
-
-### Résultats initiaux
-
-| Indicateur | Résultat |
-|---|---:|
-| Mutants générés | 73 |
-| Mutants tués | 21 |
-| Mutants survivants | 1 |
-| Mutants sans couverture | 51 |
-| Mutation score | 29 % |
-| Test strength | 95 % |
-| Couverture des lignes | 32 / 107 (30 %) |
-
-Sur les 73 mutants générés, 21 ont été détectés, un a survécu et 51 n'étaient pas couverts.
-
-Le **mutation score de 29 %** représente la proportion des mutants générés qui ont été tués.
-
-Le **test strength de 95 %** représente la proportion des mutants tués parmi les mutants effectivement couverts, soit 21 mutants sur 22.
-
-Ces résultats montrent que les tests existants détectaient déjà la majorité des mutations dans les portions de code qu'ils exécutaient.
-
-Cependant, la présence d'un mutant survivant indiquait qu'un comportement n'était pas suffisamment vérifié.
-
-## 5. Deuxième analyse : ajout des tests générés
-
-Nous avons ensuite ajouté la classe de tests générée automatiquement à la configuration de PIT.
-
-L'objectif était de déterminer si ces tests permettaient de détecter des mutations supplémentaires.
-
-### Comparaison
-
-| Indicateur | Tests originaux | Originaux + tests générés |
-|---|---:|---:|
-| Mutants générés | 73 | 73 |
-| Mutants tués | 21 | 21 |
-| Mutants survivants | 1 | 1 |
-| Mutants sans couverture | 51 | 51 |
-| Mutation score | 29 % | 29 % |
-| Test strength | 95 % | 95 % |
-| Couverture des lignes | 30 % | 30 % |
-
-PIT a confirmé que les deux classes de tests avaient été prises en compte.
-
-Cependant, aucun mutant supplémentaire n'a été éliminé.
-
-Le test généré vérifiait principalement le comportement de la méthode `normalizeMediaType`.
-
-Or, les tests originaux exerçaient déjà indirectement une partie de cette logique, notamment avec `testOcrRoutingTypeIsNormalized`, qui vérifie la résolution de l'extension `.png` à partir du type MIME `image/ocr-png`.
-
-Ainsi, le nouveau test était fonctionnel, mais il n'a pas amélioré la capacité de détection des mutants dans cette analyse.
-
-Ce résultat montre qu'un test supplémentaire peut être valide sans nécessairement augmenter le score de mutation.
-
-## 6. Identification du mutant survivant
-
-Après les deux premières analyses, nous avons consulté le rapport HTML de PIT afin d'identifier le mutant survivant.
-
-Celui-ci se trouvait dans la méthode :
-
-`getEmbeddedDocumentExtractor(ParseContext context)`
-
-### Code original
+**Code introduit :**
 
 ```java
-EmbeddedDocumentExtractor extractor =
-        context.get(EmbeddedDocumentExtractor.class);
+private static byte[] vulnerableHash(String password)
+        throws java.security.NoSuchAlgorithmException {
 
-if (extractor != null) {
-    return extractor;
+    MessageDigest digest = MessageDigest.getInstance("MD5");
+
+    return digest.digest(
+            password.getBytes(java.nio.charset.StandardCharsets.UTF_8));
 }
 ```
 
-Cette méthode vérifie si un extracteur existe déjà dans le `ParseContext`.
+**Explication :**
 
-Lorsqu'un extracteur est présent, le comportement attendu consiste à retourner directement cette même instance.
+Cette méthode utilise l'algorithme MD5 pour calculer une empreinte à partir d'un mot de passe.
 
-### Mutation introduite par PIT
+Le problème est que MD5 est un algorithme ancien qui présente plusieurs faiblesses, notamment au niveau de sa résistance aux collisions. Il n'est donc plus recommandé pour les utilisations cryptographiques sensibles.
 
-Le mutateur utilisé était :
+Dans notre cas, nous avons volontairement utilisé `MessageDigest.getInstance("MD5")` pour introduire cette mauvaise pratique.
 
-`NegateConditionals`
+Pour le stockage des mots de passe, MD5 est également inadapté, car il est trop rapide et ne fournit pas à lui seul un mécanisme de hachage sécurisé avec sel.
 
-Ce mutateur inverse une condition logique.
+**Résultat Semgrep :**
 
-Condition originale :
+Semgrep a détecté l'utilisation de MD5 avec la règle `use-of-md5` et a signalé une vulnérabilité bloquante à la ligne 401.
 
-```java
-if (extractor != null)
-```
+### 2.3 Vulnérabilité 2 — Injection de commandes
 
-Condition mutée, conceptuellement :
+**Type :** OS Command Injection  
+**CWE :** CWE-78  
+**Règle Semgrep :** `command-injection-formatted-runtime-call`  
+**Ligne détectée :** 422
 
-```java
-if (extractor == null)
-```
-
-**Statut initial : SURVIVED**
-
-### Pourquoi cette mutation est importante
-
-Avec le code original, lorsqu'un extracteur existe déjà, la méthode retourne immédiatement cet objet.
-
-Avec la condition inversée, la méthode ne retourne plus directement l'extracteur existant et poursuit son exécution vers la création d'un nouvel extracteur.
-
-Ce changement peut entraîner la perte de la configuration initialement enregistrée dans le contexte.
-
-### Pourquoi le mutant survivait-il ?
-
-Les tests sélectionnés ne vérifiaient pas explicitement que la méthode retournait exactement la même instance lorsqu'un extracteur existait déjà.
-
-La condition pouvait donc être inversée sans provoquer d'échec dans les tests.
-
-Nous avons identifié une faiblesse dans les assertions existantes et décidé d'ajouter un test manuel ciblant directement ce comportement.
-
-## 7. Test manuel ajouté
-
-Nous avons ajouté un nouveau test dans :
-
-`tika-core/src/test/java/org/apache/tika/extractor/EmbeddedDocumentUtilExtensionTest.java`
-
-### Nom du test
-
-`testExistingEmbeddedDocumentExtractorIsReturned`
-
-### Code du test
+**Code introduit :**
 
 ```java
-@Test
-public void testExistingEmbeddedDocumentExtractorIsReturned() {
-    ParseContext context = new ParseContext();
+private static void vulnerableCommandExecution(String command)
+        throws IOException {
 
-    EmbeddedDocumentExtractor expected =
-            new ParsingEmbeddedDocumentExtractor(context);
+    java.lang.Runtime runtime = java.lang.Runtime.getRuntime();
 
-    context.set(EmbeddedDocumentExtractor.class, expected);
-
-    EmbeddedDocumentExtractor actual =
-            EmbeddedDocumentUtil.getEmbeddedDocumentExtractor(context);
-
-    assertSame(expected, actual);
+    runtime.exec("cmd.exe /c " + command);
 }
 ```
 
-Nous avons également ajouté l'import :
+**Explication :**
+
+Cette méthode permet d'exécuter une commande système à partir d'une chaîne de caractères reçue en paramètre.
+
+Le problème vient du fait que la variable `command` est directement ajoutée à la commande exécutée, sans aucune validation.
+
+Si cette valeur est contrôlée par un utilisateur malveillant, celui-ci pourrait influencer l'exécution de commandes non autorisées sur le système.
+
+Nous avons introduit cette vulnérabilité pour montrer le danger de construire une commande système avec une entrée non fiable.
+
+**Résultat Semgrep :**
+
+Au départ, notre première version n'était pas détectée. Nous avons donc modifié la méthode pour utiliser une variable de type `Runtime` et une concaténation directe.
+
+Après cette modification, Semgrep a détecté la vulnérabilité à la ligne 422 avec la règle `command-injection-formatted-runtime-call`.
+
+### 2.4 Vulnérabilité 3 — Injection SQL
+
+**Type :** SQL Injection  
+**CWE :** CWE-89  
+**Règle Semgrep :** `java.lang.security.audit.formatted-sql-string.formatted-sql-string`  
+**Ligne détectée :** 445
+
+**Code introduit :**
 
 ```java
-import static org.junit.jupiter.api.Assertions.assertSame;
+public static void vulnerableSqlQuery(
+        Connection connection, String username)
+        throws SQLException {
+
+    String query = "SELECT * FROM users WHERE username = '"
+            + username + "'";
+
+    Statement statement = connection.createStatement();
+
+    statement.executeQuery(query);
+}
 ```
 
-### Intention du test
+**Explication :**
 
-Ce test vérifie que `getEmbeddedDocumentExtractor` retourne l'extracteur déjà enregistré dans le contexte plutôt que de créer une nouvelle instance.
+Cette méthode construit une requête SQL en ajoutant directement la variable `username` à la requête.
 
-Il cible directement le comportement affecté par le mutant survivant.
+Le problème est que cette variable n'est pas validée et que la requête est exécutée avec `Statement`.
 
-### Choix des données
+Si un utilisateur malveillant contrôle `username`, il pourrait modifier le fonctionnement de la requête SQL.
 
-Nous créons un `ParseContext` et une instance de `ParsingEmbeddedDocumentExtractor`.
+Pour éviter ce problème, il serait préférable d'utiliser un `PreparedStatement` avec des paramètres.
 
-Nous enregistrons ensuite cette instance dans le contexte :
+**Résultat Semgrep :**
+
+Semgrep a détecté l'injection SQL à la ligne 445 avec la règle `formatted-sql-string`.
+
+### 2.5 Vulnérabilité 4 — XML External Entity (XXE)
+
+**Type :** XML External Entity  
+**CWE :** CWE-611  
+**Règle Semgrep :** `xmlinputfactory-external-entities-enabled`  
+**Ligne détectée :** 462
+
+**Code introduit :**
 
 ```java
-context.set(EmbeddedDocumentExtractor.class, expected);
+private static XMLInputFactory vulnerableXmlParsing() {
+
+    XMLInputFactory factory = XMLInputFactory.newInstance();
+
+    factory.setProperty(
+            XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES,
+            true);
+
+    return factory;
+}
 ```
 
-Ces données permettent de reproduire précisément le cas où un extracteur existe déjà.
+**Explication :**
 
-Le choix est directement motivé par la mutation identifiée dans le rapport PIT.
+Cette méthode crée une fabrique de parseurs XML et active explicitement le support des entités externes.
 
-### Oracle du test
+Le problème est que ces entités peuvent permettre à un document XML de demander l'accès à des ressources externes, comme des fichiers locaux ou des ressources réseau.
 
-L'oracle utilisé est :
+Si un attaquant fournit un document XML malveillant et qu'un parseur utilisant cette configuration l'analyse, cela pourrait permettre l'accès à des données qui ne devraient pas être accessibles.
+
+Nous avons donc volontairement activé cette option pour introduire une vulnérabilité XXE.
+
+**Résultat Semgrep :**
+
+Semgrep a détecté l'activation des entités externes à la ligne 462 avec la règle `xmlinputfactory-external-entities-enabled`.
+
+### 2.6 Vulnérabilité 5 — Désérialisation non sécurisée
+
+**Type :** Insecure Deserialization  
+**CWE :** CWE-502  
+**Règle Semgrep :** `object-deserialization`  
+**Ligne détectée :** 482
+
+**Code introduit :**
 
 ```java
-assertSame(expected, actual);
+private static Object vulnerableDeserialization(InputStream input)
+        throws IOException, ClassNotFoundException {
+
+    ObjectInputStream objectInput =
+            new ObjectInputStream(input);
+
+    return objectInput.readObject();
+}
 ```
 
-L'assertion `assertSame` vérifie que les deux références correspondent exactement au même objet.
+**Explication :**
 
-Cette vérification est plus précise qu'une assertion `assertNotNull`, car une nouvelle instance pourrait être non nulle tout en violant le comportement attendu.
+Cette méthode utilise `ObjectInputStream` pour reconstruire un objet Java à partir d'un flux de données.
 
-Avec le code original, le test réussit puisque l'extracteur existant est retourné.
+Le problème est que la désérialisation d'objets provenant de sources non fiables peut être dangereuse.
 
-Avec le mutant, la condition est inversée et la méthode crée un nouvel extracteur. L'assertion échoue donc.
+Un attaquant pourrait fournir un objet spécialement construit pour provoquer un comportement inattendu pendant la désérialisation.
 
-Le test permet ainsi de détecter directement le mutant ciblé.
+La méthode ne vérifie pas les types d'objets autorisés et ne filtre pas les données reçues.
 
-### Validation du test
+**Résultat Semgrep :**
 
-Commande utilisée :
+Cette vulnérabilité n'était pas détectée avec notre configuration initiale `p/java`.
 
-```powershell
-.\mvnw.cmd -pl tika-core -Dtest=EmbeddedDocumentUtilExtensionTest test
+Nous avons donc ajouté la règle officielle `object-deserialization`, qui a détecté la création de `ObjectInputStream` à la ligne 482.
+
+### 2.7 Vulnérabilité 6 — Permissions de fichiers excessives
+
+**Type :** Overly Permissive File Permissions  
+**CWE :** CWE-276  
+**Règle Semgrep :** `overly-permissive-file-permission`  
+**Ligne détectée :** 501
+
+**Code introduit :**
+
+```java
+private static void vulnerableFilePermissions(Path file)
+        throws IOException {
+
+    Files.setPosixFilePermissions(
+            file,
+            PosixFilePermissions.fromString("rwxrwxrwx"));
+}
 ```
 
-Résultat :
+**Explication :**
 
-| Indicateur | Résultat |
-|---|---:|
-| Tests exécutés | 11 |
-| Échecs | 0 |
-| Erreurs | 0 |
-| Tests ignorés | 0 |
-| Résultat Maven | BUILD SUCCESS |
+Cette méthode modifie les permissions d'un fichier en utilisant la valeur `rwxrwxrwx`.
 
-Le fichier contenait initialement 10 tests.
+Cette valeur signifie que le propriétaire, le groupe et les autres utilisateurs peuvent tous lire, modifier et exécuter le fichier.
 
-Après l'ajout de notre test manuel, les 11 tests ont réussi.
+Le problème est que ces permissions sont beaucoup trop permissives, surtout si le fichier contient des informations sensibles.
 
-## 8. Troisième analyse : résultats après le test manuel
+Cela pourrait permettre à des utilisateurs non autorisés de modifier ou de consulter des fichiers.
 
-Nous avons relancé PIT après l'ajout du test manuel afin de mesurer son effet.
+Nous avons utilisé cette configuration pour montrer une mauvaise gestion des permissions de fichiers.
 
-### Résultats
+**Résultat Semgrep :**
 
-| Indicateur | Avant | Après |
+Semgrep a détecté les permissions excessives à la ligne 501 grâce à la règle officielle `overly-permissive-file-permission`.
+
+### 2.8 Vulnérabilité 7 — Protocole SSL obsolète
+
+**Type :** Utilisation d'un protocole SSL faible  
+**CWE :** CWE-326  
+**Règle Semgrep :** `java.lang.security.audit.weak-ssl-context.weak-ssl-context`  
+**Ligne détectée :** 518
+
+**Code introduit :**
+
+```java
+private static SSLContext vulnerableSslContext()
+        throws java.security.NoSuchAlgorithmException {
+
+    return SSLContext.getInstance("SSLv3");
+}
+```
+
+**Explication :**
+
+Cette méthode crée un contexte SSL utilisant la version SSLv3.
+
+Le problème est que SSLv3 est un protocole ancien qui présente des faiblesses de sécurité connues. Il ne devrait donc plus être utilisé pour protéger les communications.
+
+Un protocole plus récent comme TLS 1.2 ou TLS 1.3 devrait être privilégié.
+
+Nous avons volontairement utilisé `SSLv3` pour introduire une mauvaise configuration de sécurité.
+
+**Résultat Semgrep :**
+
+Semgrep a détecté l'utilisation de SSLv3 à la ligne 518 avec la règle `weak-ssl-context`.
+
+### 2.9 Comparaison des résultats Semgrep
+
+Nous avons effectué deux analyses avec la même sélection de règles Semgrep.
+
+La première a été effectuée sur la version du fichier avant l'introduction des vulnérabilités. La deuxième a été effectuée après les modifications.
+
+Les résultats ont été enregistrés dans :
+
+- `semgrep-reports/avant-final.json`
+- `semgrep-reports/apres.json`
+
+| Vulnérabilité | Avant | Après |
 |---|---:|---:|
-| Mutants générés | 73 | 73 |
-| Mutants tués | 21 | 23 |
-| Mutants survivants | 1 | 0 |
-| Mutants sans couverture | 51 | 50 |
-| Mutation score | 29 % | 32 % |
-| Test strength | 95 % | 100 % |
-| Couverture des lignes | 32 / 107 (30 %) | 33 / 107 (31 %) |
+| MD5 | 0 | 1 |
+| Injection de commandes | 0 | 1 |
+| Injection SQL | 0 | 1 |
+| XXE | 0 | 1 |
+| Désérialisation non sécurisée | 0 | 1 |
+| Permissions excessives | 0 | 1 |
+| SSLv3 | 0 | 1 |
+| **Total** | **0** | **7** |
 
-Le test manuel a permis d'éliminer le mutant survivant.
+Le rapport initial ne contenait aucune détection, tandis que le rapport final contenait 7 détections bloquantes.
 
-Le nombre total de mutants tués est également passé de 21 à 23.
+Nous avons aussi confirmé ces résultats dans GitHub Actions lors d'une pull request entre la branche `tache3-semgrep` et `main`.
 
-### Mutant `NegateConditionals`
+Le workflow a affiché :
 
-Avant l'ajout du test, 10 mutants de ce type étaient tués et un survivait.
+```text
+Vulnerabilites avant : 0
+Vulnerabilites apres : 7
+Nouvelles vulnerabilites : 7
 
-Après l'ajout du test, 11 mutants de ce type étaient tués et aucun ne survivait.
+ECHEC : nouvelles vulnerabilites detectees.
+Process completed with exit code 1.
+```
 
-L'assertion `assertSame` permet de détecter l'inversion de la condition `extractor != null`.
+Ces résultats montrent que les sept vulnérabilités ont bien été introduites dans le code et détectées par Semgrep.
 
-### Mutant `NullReturn`
+### 2.10 Conclusion
 
-Le nombre de mutants tués par `NullReturn` est passé de 3 à 4.
+Pour cette partie, nous avons réussi à introduire 7 vulnérabilités de types différents dans une classe Apache Tika sur laquelle nous avions déjà travaillé pendant la tâche 2.
 
-Ce mutateur remplace une valeur retournée par `null`.
+Nous avons utilisé les règles officielles de Semgrep pour identifier chacune d'elles. Certaines vulnérabilités ont été détectées directement avec `p/java`, tandis que d'autres ont nécessité l'ajout de règles supplémentaires.
 
-Notre test exige que la méthode retourne précisément l'objet `expected`.
+La comparaison des rapports montre que nous sommes passés de 0 à 7 vulnérabilités détectées.
 
-Si PIT remplace ce retour par `null`, l'assertion `assertSame(expected, actual)` échoue.
+Cette partie nous a permis de mieux comprendre comment Semgrep fonctionne, mais aussi le fait qu'une vulnérabilité présente dans le code n'est pas nécessairement détectée par toutes les configurations de règles.
 
-Ainsi, le test manuel a permis de détecter deux mutations supplémentaires.
-
-### Interprétation des résultats
-
-Le mutation score est passé de 29 % à 32 %, soit une amélioration de trois points de pourcentage.
-
-Le test strength est passé de 95 % à 100 %.
-
-Cela signifie que tous les mutants effectivement couverts par les tests sélectionnés ont été éliminés.
-
-Il faut toutefois distinguer **100 % de test strength** et **100 % de mutation score**.
-
-Notre mutation score reste à 32 %, puisque 50 mutants demeurent sans couverture.
-
-Ces mutants ne sont pas considérés comme survivants : les tests sélectionnés n'exécutent simplement pas les portions de code correspondantes.
-
-## 9. Synthèse des trois analyses
-
-| Étape | Mutants tués | Survivants | Sans couverture | Mutation score | Test strength |
-|---|---:|---:|---:|---:|---:|
-| Tests originaux | 21 | 1 | 51 | 29 % | 95 % |
-| Originaux + tests générés | 21 | 1 | 51 | 29 % | 95 % |
-| Après le test manuel | 23 | 0 | 50 | 32 % | 100 % |
-
-Les résultats montrent que l'ajout des tests générés n'a pas amélioré le score de mutation dans notre cas.
-
-En revanche, l'analyse du rapport PIT a permis d'identifier une faiblesse précise dans les tests existants.
-
-Le test manuel `testExistingEmbeddedDocumentExtractorIsReturned` a éliminé le mutant survivant de type `NegateConditionals` et a également détecté un mutant supplémentaire de type `NullReturn`.
-
-## 10. Conclusion
-
-L'utilisation de PIT a permis d'identifier un comportement insuffisamment vérifié dans la méthode `getEmbeddedDocumentExtractor`.
-
-Le mutant survivant inversait une condition logique, ce qui pouvait empêcher la méthode de retourner un extracteur déjà enregistré dans le contexte.
-
-Nous avons ajouté un test manuel utilisant `assertSame` pour vérifier l'identité de l'objet retourné.
-
-Après cette modification :
-
-- Le nombre de mutants tués est passé de 21 à 23.
-- Le nombre de mutants survivants est passé de 1 à 0.
-- Le mutation score est passé de 29 % à 32 %.
-- Le test strength est passé de 95 % à 100 %.
-
-Cette expérience montre que les tests de mutation permettent de détecter des faiblesses que les mesures traditionnelles de couverture ne révèlent pas nécessairement.
+Les méthodes ajoutées restent des exemples de démonstration pour le cours et ne doivent pas être utilisées dans une application en production.
