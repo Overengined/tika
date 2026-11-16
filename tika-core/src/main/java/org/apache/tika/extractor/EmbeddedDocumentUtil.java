@@ -18,7 +18,18 @@ package org.apache.tika.extractor;
 
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.ObjectInputStream;
 import java.io.Serializable;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.security.MessageDigest;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Statement;
+import javax.net.ssl.SSLContext;
+import javax.xml.stream.XMLInputFactory;
 
 import org.xml.sax.ContentHandler;
 import org.xml.sax.SAXException;
@@ -366,4 +377,145 @@ public class EmbeddedDocumentUtil implements Serializable {
         }
         return parser.getClass().equals(clazz);
     }
+        // ============================================================
+    // IFT3913 - TACHE 3
+    // Vulnerabilites introduites pour l'analyse Semgrep
+    //
+    // Ces methodes sont reservees a la demonstration.
+    // Elles ne doivent pas etre appelees en production.
+    // ============================================================
+
+
+    /**
+     * VULNERABILITE 1
+     * CWE-327 : Utilisation d'un algorithme cryptographique faible.
+     *
+     * Regle Semgrep : use-of-md5
+     *
+     * MD5 n'est plus considere comme suffisamment resistant
+     * aux collisions pour les usages cryptographiques sensibles.
+     */
+    private static byte[] vulnerableHash(String password)
+            throws java.security.NoSuchAlgorithmException {
+
+        MessageDigest digest = MessageDigest.getInstance("MD5");
+
+        return digest.digest(
+                password.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+
+        /**
+     * VULNERABILITE 2
+     * CWE-78 : Injection de commandes systeme.
+     *
+     * Regle Semgrep : command-injection-formatted-runtime-call
+     *
+     * Une entree non fiable est concatenee directement
+     * dans une commande systeme.
+     */
+    private static void vulnerableCommandExecution(String command)
+            throws IOException {
+
+        java.lang.Runtime runtime = java.lang.Runtime.getRuntime();
+
+        runtime.exec("cmd.exe /c " + command);
+    }
+
+
+    /**
+     * VULNERABILITE 3
+     * CWE-89 : Injection SQL.
+     *
+     * Regle Semgrep : formatted-sql-string
+     *
+     * Le nom d'utilisateur est concatene directement
+     * dans la requete SQL sans requete parametree.
+     */
+    @Deprecated
+    public static void vulnerableSqlQuery(
+            Connection connection, String username)
+            throws SQLException {
+
+        String query = "SELECT * FROM users WHERE username = '"
+                + username + "'";
+
+        Statement statement = connection.createStatement();
+
+        statement.executeQuery(query);
+    }
+
+
+    /**
+     * VULNERABILITE 4
+     * CWE-611 : XML External Entity (XXE).
+     *
+     * Regle Semgrep : xmlinputfactory-external-entities-enabled
+     *
+     * Les entites XML externes sont explicitement autorisees.
+     * Cela peut permettre la lecture de ressources non autorisees.
+     */
+    private static XMLInputFactory vulnerableXmlParsing() {
+
+        XMLInputFactory factory = XMLInputFactory.newInstance();
+
+        factory.setProperty(
+                XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES,
+                true);
+
+        return factory;
+    }
+
+
+    /**
+     * VULNERABILITE 5
+     * CWE-502 : Deserialisation non securisee.
+     *
+     * Regle Semgrep : object-deserialization
+     *
+     * Un objet Java est reconstruit depuis un flux
+     * potentiellement controle par un attaquant.
+     */
+    private static Object vulnerableDeserialization(InputStream input)
+            throws IOException, ClassNotFoundException {
+
+        ObjectInputStream objectInput =
+                new ObjectInputStream(input);
+
+        return objectInput.readObject();
+    }
+
+
+    /**
+     * VULNERABILITE 6
+     * CWE-276 : Permissions de fichier excessives.
+     *
+     * Regle Semgrep : overly-permissive-file-permission
+     *
+     * Tous les utilisateurs obtiennent les droits
+     * de lecture, ecriture et execution.
+     */
+    private static void vulnerableFilePermissions(Path file)
+            throws IOException {
+
+        Files.setPosixFilePermissions(
+                file,
+                PosixFilePermissions.fromString("rwxrwxrwx"));
+    }
+
+
+    /**
+     * VULNERABILITE 7
+     * CWE-326 : Utilisation d'un protocole SSL obsolete.
+     *
+     * Regle Semgrep : weak-ssl-context
+     *
+     * SSLv3 est obsolete et presente des faiblesses connues.
+     */
+    private static SSLContext vulnerableSslContext()
+            throws java.security.NoSuchAlgorithmException {
+
+        return SSLContext.getInstance("SSLv3");
+    }
+
 }
